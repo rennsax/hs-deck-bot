@@ -7,7 +7,12 @@ from nonebot.params import CommandArg
 from hs_deck_bot.commands import handle_search_deck_command
 
 
-search_deck = on_command("search-deck", priority=10, block=True)
+search_deck = on_command(
+    "search-deck",
+    aliases={"找卡组"},
+    priority=10,
+    block=True,
+)
 
 
 @search_deck.handle()

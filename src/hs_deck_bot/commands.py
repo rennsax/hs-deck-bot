@@ -32,10 +32,10 @@ from .services import (
 )
 
 
-DECK_USAGE = "用法：/deck <卡组代码>"
-ADD_DECK_USAGE = "用法：/add-deck <卡组名> <创建者> <卡组代码>"
-SEARCH_DECK_USAGE = "用法：/search-deck <卡组名>"
-UNKNOWN_COMMAND = "未知命令。支持的命令：/deck、/add-deck、/search-deck"
+DECK_USAGE = "用法：/卡组 <卡组代码>"
+ADD_DECK_USAGE = "用法：/添加卡组 <卡组名> <创建者> <卡组代码>"
+SEARCH_DECK_USAGE = "用法：/找卡组 <卡组名>"
+UNKNOWN_COMMAND = "未知命令。支持的命令：/卡组、/添加卡组、/找卡组"
 
 logger = logging.getLogger(__name__)
 
@@ -135,8 +135,11 @@ CommandHandler = Callable[[str], Awaitable[str]]
 
 COMMAND_HANDLERS: dict[str, CommandHandler] = {
     "/deck": handle_deck_command,
+    "/卡组": handle_deck_command,
     "/add-deck": handle_add_deck_command,
+    "/添加卡组": handle_add_deck_command,
     "/search-deck": handle_search_deck_command,
+    "/找卡组": handle_search_deck_command,
 }
 
 

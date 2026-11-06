@@ -7,7 +7,12 @@ from nonebot.params import CommandArg
 from hs_deck_bot.commands import handle_add_deck_command
 
 
-add_deck = on_command("add-deck", priority=10, block=True)
+add_deck = on_command(
+    "add-deck",
+    aliases={"添加卡组"},
+    priority=10,
+    block=True,
+)
 
 
 @add_deck.handle()
