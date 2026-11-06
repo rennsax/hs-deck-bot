@@ -9,14 +9,21 @@ dependencies = [
     "nonebot-adapter-qq>=1.7.3",
     "manacost-deckstrings>=1.0.0",
     "platformdirs>=4.3.0",
+    "sqlalchemy[asyncio]>=2.0.57",
+    "aiosqlite>=0.22.1",
+    "alembic>=1.20.1",
+    "python-dotenv>=1.2.4",
 ]
+
+[project.scripts]
+hs-deck-bot = "hs_deck_bot.__main__:main"
 
 [build-system]
 requires = ["uv_build>=0.13.4,<0.14"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-module-name = "hs_deck"
+module-name = ["hs_deck", "hs_deck_bot"]
 
 [project.optional-dependencies]
 dev = [
@@ -24,7 +31,7 @@ dev = [
 ]
 
 [tool.nonebot]
-plugin_dirs = ["src/plugins"]
+plugin_dirs = ["src/hs_deck_bot/plugins"]
 builtin_plugins = []
 
 [tool.nonebot.adapters]

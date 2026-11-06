@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
 
 from manacost_deckstrings import DeckstringError, decode
 
-from .cache import CardIndex, CardMetadata, load_card_index
+from .cache import CardMetadata
 from .errors import CardNotFoundError, DeckCodeError
 
 
@@ -148,8 +147,7 @@ class Deck:
         deck_code: str,
         deck_name: str = "卡组名",
         *,
-        cache_dir: str | Path | None = None,
-        force_refresh: bool = False,
+        card_index: Mapping[int, CardMetadata],
     ) -> "Deck":
         """Build a localized deck from a Hearthstone deck code and name."""
 
@@ -165,10 +163,6 @@ class Deck:
         if len(decoded["heroes"]) != 1:
             raise DeckCodeError("卡组代码必须包含且仅包含一个英雄")
 
-        card_index = load_card_index(
-            cache_dir=cache_dir,
-            force_refresh=force_refresh,
-        )
         hero = Card._from_metadata(
             _require_metadata(card_index, decoded["heroes"][0])
         )
@@ -259,7 +253,10 @@ class Deck:
         return "\n".join(lines)
 
 
-def _require_metadata(card_index: CardIndex, dbf_id: int) -> CardMetadata:
+def _require_metadata(
+    card_index: Mapping[int, CardMetadata],
+    dbf_id: int,
+) -> CardMetadata:
     try:
         return card_index[dbf_id]
     except KeyError as error:

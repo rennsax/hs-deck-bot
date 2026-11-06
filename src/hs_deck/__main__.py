@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 
 from . import Deck, HsDeckError
+from .cache import load_card_index
 
 
 def _parse_args() -> argparse.Namespace:
@@ -25,11 +26,14 @@ def _parse_args() -> argparse.Namespace:
 def main() -> int:
     args = _parse_args()
     try:
+        card_index = load_card_index(
+            cache_dir=args.cache_dir,
+            force_refresh=args.force_refresh,
+        )
         deck = Deck.from_code(
             args.deck_code,
             args.name,
-            cache_dir=args.cache_dir,
-            force_refresh=args.force_refresh,
+            card_index=card_index,
         )
     except HsDeckError as error:
         print(f"错误：{error}", file=sys.stderr)
