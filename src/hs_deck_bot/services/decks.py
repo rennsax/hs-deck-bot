@@ -3,16 +3,24 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
 import unicodedata
 
+from manacost_deckstrings import DeckstringError, encode
+from rapidfuzz import fuzz, process
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from hs_deck import Deck
 
 from ..database import CardModel, DeckCardModel, DeckModel
+
+
+SEARCH_RESULT_LIMIT = 5
+SEARCH_SCORE_CUTOFF = 60.0
 
 
 class DeckStorageError(RuntimeError):
@@ -37,6 +45,16 @@ class RegisteredDeck:
     class_name: str
     format_name: str
     card_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class DeckSearchResult:
+    """One registered deck returned by a name search."""
+
+    id: int
+    name: str
+    creator_name: str
+    deck_code: str
 
 
 async def register_deck(
@@ -141,6 +159,113 @@ async def register_deck(
         raise DeckStorageError("卡组数据不符合数据库约束") from error
     except SQLAlchemyError as error:
         raise DeckStorageError("卡组保存失败") from error
+
+
+async def search_decks(
+    session: AsyncSession,
+    query: str,
+    *,
+    limit: int = SEARCH_RESULT_LIMIT,
+    score_cutoff: float = SEARCH_SCORE_CUTOFF,
+) -> tuple[DeckSearchResult, ...]:
+    """Find registered decks by fuzzy-matching their display names."""
+
+    candidate_rows = (
+        await session.execute(
+            select(
+                DeckModel.id,
+                DeckModel.name,
+                DeckModel.creator_name,
+            ).order_by(DeckModel.id)
+        )
+    ).all()
+    choices = {
+        deck_id: name
+        for deck_id, name, _creator_name in candidate_rows
+    }
+    matched_ids = _find_deck_ids(
+        query,
+        choices,
+        limit=limit,
+        score_cutoff=score_cutoff,
+    )
+    if not matched_ids:
+        return ()
+
+    matched_decks = (
+        await session.scalars(
+            select(DeckModel)
+            .where(DeckModel.id.in_(matched_ids))
+            .options(selectinload(DeckModel.card_entries))
+        )
+    ).all()
+    decks_by_id = {deck.id: deck for deck in matched_decks}
+    try:
+        return tuple(
+            DeckSearchResult(
+                id=deck_id,
+                name=decks_by_id[deck_id].name,
+                creator_name=decks_by_id[deck_id].creator_name,
+                deck_code=_encode_stored_deck(decks_by_id[deck_id]),
+            )
+            for deck_id in matched_ids
+        )
+    except KeyError as error:
+        raise DeckStorageError("卡组在查询期间发生变化，请重试") from error
+
+
+def _find_deck_ids(
+    query: str,
+    choices: Mapping[int, str],
+    *,
+    limit: int = SEARCH_RESULT_LIMIT,
+    score_cutoff: float = SEARCH_SCORE_CUTOFF,
+) -> tuple[int, ...]:
+    matches = process.extract(
+        query,
+        choices,
+        scorer=fuzz.WRatio,
+        processor=_normalize_search_text,
+        limit=limit,
+        score_cutoff=score_cutoff,
+    )
+    return tuple(match[2] for match in matches)
+
+
+def _normalize_search_text(value: str) -> str:
+    return unicodedata.normalize("NFKC", value).strip().casefold()
+
+
+def _encode_stored_deck(deck: DeckModel) -> str:
+    main_cards: list[list[int]] = []
+    sideboard_cards: list[list[int]] = []
+    for entry in deck.card_entries:
+        if entry.zone == "main":
+            main_cards.append([entry.card_dbf_id, entry.quantity])
+            continue
+        if entry.zone != "sideboard" or entry.sideboard_owner_dbf_id is None:
+            raise DeckStorageError(f"卡组 {deck.id} 包含无效卡牌区域")
+        sideboard_cards.append(
+            [
+                entry.card_dbf_id,
+                entry.quantity,
+                entry.sideboard_owner_dbf_id,
+            ]
+        )
+
+    try:
+        return encode(
+            {
+                "format": deck.format_id,
+                "heroes": [deck.hero_dbf_id],
+                "cards": main_cards,
+                "sideboardCards": sideboard_cards,
+            }
+        )
+    except DeckstringError as error:
+        raise DeckStorageError(
+            f"无法从数据库重建卡组 {deck.id} 的代码"
+        ) from error
 
 
 def _clean_display_name(value: str, field_name: str) -> str:

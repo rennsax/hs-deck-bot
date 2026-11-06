@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 import logging
+import unicodedata
 
 from hs_deck import (
     CardIndexError,
@@ -22,16 +23,19 @@ from .database import (
 )
 from .services import (
     DeckNameConflictError,
+    DeckSearchResult,
     DeckStorageError,
     InvalidDeckNameError,
     RegisteredDeck,
     register_deck,
+    search_decks,
 )
 
 
 DECK_USAGE = "用法：/deck <卡组代码>"
 ADD_DECK_USAGE = "用法：/add-deck <卡组名> <创建者> <卡组代码>"
-UNKNOWN_COMMAND = "未知命令。支持的命令：/deck、/add-deck"
+SEARCH_DECK_USAGE = "用法：/search-deck <卡组名>"
+UNKNOWN_COMMAND = "未知命令。支持的命令：/deck、/add-deck、/search-deck"
 
 logger = logging.getLogger(__name__)
 
@@ -103,11 +107,36 @@ async def handle_add_deck_command(raw_args: str) -> str:
         return "卡组注册失败，请稍后重试。"
 
 
+async def handle_search_deck_command(raw_args: str) -> str:
+    """Execute `/search-deck` and return its user-facing response."""
+
+    query = unicodedata.normalize("NFKC", raw_args.strip())
+    if not query:
+        return SEARCH_DECK_USAGE
+    if len(query) > 255:
+        return "卡组名不能超过 255 个字符。"
+
+    try:
+        async with session_scope() as session:
+            results = await search_decks(session, query)
+    except (DeckStorageError, DatabaseError):
+        logger.exception("处理 /search-deck 命令时发生数据库错误")
+        return "卡组查询失败，请稍后重试。"
+    except Exception:
+        logger.exception("处理 /search-deck 命令时发生未预期错误")
+        return "卡组查询失败，请稍后重试。"
+
+    if not results:
+        return f"没有找到名称匹配「{query}」的卡组。"
+    return _search_deck_success_message(results)
+
+
 CommandHandler = Callable[[str], Awaitable[str]]
 
 COMMAND_HANDLERS: dict[str, CommandHandler] = {
     "/deck": handle_deck_command,
     "/add-deck": handle_add_deck_command,
+    "/search-deck": handle_search_deck_command,
 }
 
 
@@ -163,3 +192,20 @@ def _add_deck_success_message(result: RegisteredDeck) -> str:
             f"主牌数量：{result.card_count}",
         ]
     )
+
+
+def _search_deck_success_message(
+    results: tuple[DeckSearchResult, ...],
+) -> str:
+    blocks = [f"找到 {len(results)} 套匹配卡组："]
+    blocks.extend(
+        "\n".join(
+            [
+                f"{index}. 卡组名：{result.name}",
+                f"创建者：{result.creator_name}",
+                f"卡组代码：{result.deck_code}",
+            ]
+        )
+        for index, result in enumerate(results, start=1)
+    )
+    return "\n\n".join(blocks)
