@@ -31,6 +31,7 @@ from .services import (
     InvalidDeckNameError,
     RegisteredDeck,
     delete_deck,
+    get_deck,
     register_deck,
     search_decks,
 )
@@ -39,7 +40,7 @@ from .services import (
 DECK_USAGE = "用法：/卡组 <卡组代码>"
 ADD_DECK_USAGE = "用法：/添加卡组 <卡组名> <创建者> <卡组代码>"
 DELETE_DECK_USAGE = "用法：/删卡组 <卡组名> <创建者>"
-SEARCH_DECK_USAGE = "用法：/找卡组 <卡组名>"
+SEARCH_DECK_USAGE = "用法：/找卡组 <卡组名> [创建者]"
 UNKNOWN_COMMAND = (
     "未知命令。支持的命令：/卡组、/添加卡组、/删卡组、/找卡组"
 )
@@ -118,15 +119,25 @@ async def handle_add_deck_command(raw_args: str) -> str:
 async def handle_search_deck_command(raw_args: str) -> str:
     """Execute `/search-deck` and return its user-facing response."""
 
-    query = unicodedata.normalize("NFKC", raw_args.strip())
-    if not query:
+    parsed_args = _parse_search_deck_args(raw_args)
+    if parsed_args is None:
         return SEARCH_DECK_USAGE
-    if len(query) > 255:
+
+    deck_name, creator_name = parsed_args
+    if len(deck_name) > 255:
         return "卡组名不能超过 255 个字符。"
+    if creator_name is not None and len(creator_name) > 255:
+        return "创建者不能超过 255 个字符。"
 
     try:
         async with session_scope() as session:
-            results = await search_decks(session, query)
+            if creator_name is None:
+                results = await search_decks(session, deck_name)
+            else:
+                result = await get_deck(session, deck_name, creator_name)
+                results = (result,) if result is not None else ()
+    except InvalidDeckNameError as error:
+        return str(error)
     except (DeckStorageError, DatabaseError):
         logger.exception("处理 /search-deck 命令时发生数据库错误")
         return "卡组查询失败，请稍后重试。"
@@ -135,7 +146,14 @@ async def handle_search_deck_command(raw_args: str) -> str:
         return "卡组查询失败，请稍后重试。"
 
     if not results:
-        return f"没有找到名称匹配「{query}」的卡组。"
+        if creator_name is not None:
+            return (
+                f"没有找到创建者「{creator_name}」"
+                f"的卡组「{deck_name}」。"
+            )
+        return f"没有找到名称匹配「{deck_name}」的卡组。"
+    if creator_name is not None:
+        return _exact_deck_success_message(results[0])
     return _search_deck_success_message(results)
 
 
@@ -209,6 +227,18 @@ def _parse_delete_deck_args(raw_args: str) -> tuple[str, str] | None:
     return parts[0], parts[1]
 
 
+def _parse_search_deck_args(raw_args: str) -> tuple[str, str | None] | None:
+    parts = raw_args.split()
+    if len(parts) == 1:
+        return unicodedata.normalize("NFKC", parts[0]), None
+    if len(parts) == 2:
+        return (
+            unicodedata.normalize("NFKC", parts[0]),
+            unicodedata.normalize("NFKC", parts[1]),
+        )
+    return None
+
+
 def _deck_error_message(error: HsDeckError) -> str:
     if isinstance(error, DeckCodeError):
         return "卡组代码无效，请检查后重试。"
@@ -265,6 +295,17 @@ def _search_deck_success_message(
         for index, result in enumerate(results, start=1)
     )
     return "\n\n".join(blocks)
+
+
+def _exact_deck_success_message(result: DeckSearchResult) -> str:
+    return "\n".join(
+        [
+            f"卡组名：{result.name}",
+            f"创建者：{result.creator_name}",
+            f"创建时间：{_format_created_at(result.created_at)}",
+            f"卡组代码：{result.deck_code}",
+        ]
+    )
 
 
 def _format_created_at(created_at: datetime) -> str:

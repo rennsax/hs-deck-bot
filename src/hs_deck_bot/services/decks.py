@@ -218,17 +218,38 @@ async def search_decks(
     decks_by_id = {deck.id: deck for deck in matched_decks}
     try:
         return tuple(
-            DeckSearchResult(
-                id=deck_id,
-                name=decks_by_id[deck_id].name,
-                creator_name=decks_by_id[deck_id].creator_name,
-                created_at=_as_utc(decks_by_id[deck_id].created_at),
-                deck_code=_encode_stored_deck(decks_by_id[deck_id]),
-            )
+            _build_search_result(decks_by_id[deck_id])
             for deck_id in matched_ids
         )
     except KeyError as error:
         raise DeckStorageError("卡组在查询期间发生变化，请重试") from error
+
+
+async def get_deck(
+    session: AsyncSession,
+    deck_name: str,
+    creator_name: str,
+) -> DeckSearchResult | None:
+    """Find one deck by its exact display name and creator name."""
+
+    display_deck_name = _clean_display_name(deck_name, "卡组名")
+    display_creator_name = _clean_display_name(creator_name, "创建者")
+    try:
+        deck = (
+            await session.execute(
+                select(DeckModel)
+                .where(
+                    DeckModel.creator_name == display_creator_name,
+                    DeckModel.name == display_deck_name,
+                )
+                .options(selectinload(DeckModel.card_entries))
+            )
+        ).scalar_one_or_none()
+        return _build_search_result(deck) if deck is not None else None
+    except DeckStorageError:
+        raise
+    except SQLAlchemyError as error:
+        raise DeckStorageError("卡组查询失败") from error
 
 
 async def delete_deck(
@@ -297,6 +318,16 @@ def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def _build_search_result(deck: DeckModel) -> DeckSearchResult:
+    return DeckSearchResult(
+        id=deck.id,
+        name=deck.name,
+        creator_name=deck.creator_name,
+        created_at=_as_utc(deck.created_at),
+        deck_code=_encode_stored_deck(deck),
+    )
 
 
 def _encode_stored_deck(deck: DeckModel) -> str:

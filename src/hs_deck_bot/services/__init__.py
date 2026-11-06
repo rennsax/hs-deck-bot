@@ -9,6 +9,7 @@ from .decks import (
     InvalidDeckNameError,
     RegisteredDeck,
     delete_deck,
+    get_deck,
     register_deck,
     search_decks,
 )
@@ -22,6 +23,7 @@ __all__ = [
     "InvalidDeckNameError",
     "RegisteredDeck",
     "delete_deck",
+    "get_deck",
     "register_deck",
     "search_decks",
 ]
