@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timedelta, timezone
 import logging
 import unicodedata
 
@@ -44,6 +45,7 @@ UNKNOWN_COMMAND = (
 )
 
 logger = logging.getLogger(__name__)
+CHINA_STANDARD_TIME = timezone(timedelta(hours=8))
 
 
 async def handle_deck_command(raw_args: str) -> str:
@@ -256,9 +258,16 @@ def _search_deck_success_message(
             [
                 f"{index}. 卡组名：{result.name}",
                 f"创建者：{result.creator_name}",
+                f"创建时间：{_format_created_at(result.created_at)}",
                 f"卡组代码：{result.deck_code}",
             ]
         )
         for index, result in enumerate(results, start=1)
     )
     return "\n\n".join(blocks)
+
+
+def _format_created_at(created_at: datetime) -> str:
+    return created_at.astimezone(CHINA_STANDARD_TIME).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )

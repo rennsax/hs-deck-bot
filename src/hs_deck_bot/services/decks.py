@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import unicodedata
 
 from manacost_deckstrings import DeckstringError, encode
@@ -58,6 +59,7 @@ class DeckSearchResult:
     id: int
     name: str
     creator_name: str
+    created_at: datetime
     deck_code: str
 
 
@@ -220,6 +222,7 @@ async def search_decks(
                 id=deck_id,
                 name=decks_by_id[deck_id].name,
                 creator_name=decks_by_id[deck_id].creator_name,
+                created_at=_as_utc(decks_by_id[deck_id].created_at),
                 deck_code=_encode_stored_deck(decks_by_id[deck_id]),
             )
             for deck_id in matched_ids
@@ -288,6 +291,12 @@ def _find_deck_ids(
 
 def _normalize_search_text(value: str) -> str:
     return unicodedata.normalize("NFKC", value).strip().casefold()
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _encode_stored_deck(deck: DeckModel) -> str:
