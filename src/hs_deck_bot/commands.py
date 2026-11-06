@@ -24,6 +24,8 @@ from .database import (
 )
 from .services import (
     DeletedDeck,
+    DeckListItem,
+    DeckListOrder,
     DeckNameConflictError,
     DeckNotFoundError,
     DeckSearchResult,
@@ -32,6 +34,7 @@ from .services import (
     RegisteredDeck,
     delete_deck,
     get_deck,
+    list_decks,
     register_deck,
     search_decks,
 )
@@ -40,13 +43,16 @@ from .services import (
 DECK_USAGE = "用法：/卡组 <卡组代码>"
 ADD_DECK_USAGE = "用法：/添加卡组 <卡组名> <创建者> <卡组代码>"
 DELETE_DECK_USAGE = "用法：/删卡组 <卡组名> <创建者>"
+LIST_DECK_USAGE = "用法：/所有卡组 [页数]"
 SEARCH_DECK_USAGE = "用法：/找卡组 <卡组名> [创建者]"
 UNKNOWN_COMMAND = (
-    "未知命令。支持的命令：/卡组、/添加卡组、/删卡组、/找卡组"
+    "未知命令。支持的命令："
+    "/卡组、/添加卡组、/删卡组、/找卡组、/所有卡组"
 )
 
 logger = logging.getLogger(__name__)
 CHINA_STANDARD_TIME = timezone(timedelta(hours=8))
+DECK_LIST_PAGE_SIZE = 20
 
 
 async def handle_deck_command(raw_args: str) -> str:
@@ -184,6 +190,42 @@ async def handle_delete_deck_command(raw_args: str) -> str:
         return "卡组删除失败，请稍后重试。"
 
 
+async def handle_list_deck_command(raw_args: str) -> str:
+    """Execute `/list-deck` and return its user-facing response."""
+
+    parts = raw_args.split()
+    if len(parts) > 1:
+        return LIST_DECK_USAGE
+
+    page = 1
+    if parts:
+        try:
+            page = int(parts[0])
+        except ValueError:
+            return "页数必须是正整数。"
+        if page < 1:
+            return "页数必须是正整数。"
+
+    try:
+        async with session_scope() as session:
+            results = await list_decks(
+                session,
+                page=page,
+                page_size=DECK_LIST_PAGE_SIZE,
+                order=DeckListOrder.LATEST,
+            )
+    except (DeckStorageError, DatabaseError):
+        logger.exception("处理 /list-deck 命令时发生数据库错误")
+        return "卡组列表查询失败，请稍后重试。"
+    except Exception:
+        logger.exception("处理 /list-deck 命令时发生未预期错误")
+        return "卡组列表查询失败，请稍后重试。"
+
+    if not results:
+        return f"第 {page} 页没有卡组。"
+    return _list_deck_success_message(page, results)
+
+
 CommandHandler = Callable[[str], Awaitable[str]]
 
 COMMAND_HANDLERS: dict[str, CommandHandler] = {
@@ -193,6 +235,8 @@ COMMAND_HANDLERS: dict[str, CommandHandler] = {
     "/添加卡组": handle_add_deck_command,
     "/delete-deck": handle_delete_deck_command,
     "/删卡组": handle_delete_deck_command,
+    "/list-deck": handle_list_deck_command,
+    "/所有卡组": handle_list_deck_command,
     "/search-deck": handle_search_deck_command,
     "/找卡组": handle_search_deck_command,
 }
@@ -306,6 +350,24 @@ def _exact_deck_success_message(result: DeckSearchResult) -> str:
             f"卡组代码：{result.deck_code}",
         ]
     )
+
+
+def _list_deck_success_message(
+    page: int,
+    results: tuple[DeckListItem, ...],
+) -> str:
+    start = (page - 1) * DECK_LIST_PAGE_SIZE + 1
+    lines = [
+        "以下是第 "
+        f"{page} 页卡组，请使用 `/找卡组 <卡组名> <创建者>` "
+        "查看卡组代码。",
+        "",
+    ]
+    lines.extend(
+        f"{number}. {result.name} {result.creator_name}"
+        for number, result in enumerate(results, start=start)
+    )
+    return "\n".join(lines)
 
 
 def _format_created_at(created_at: datetime) -> str:

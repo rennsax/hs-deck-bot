@@ -6,6 +6,7 @@ from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import Enum
 import unicodedata
 
 from manacost_deckstrings import DeckstringError, encode
@@ -22,6 +23,12 @@ from ..database import CardModel, DeckCardModel, DeckModel
 
 SEARCH_RESULT_LIMIT = 5
 SEARCH_SCORE_CUTOFF = 60.0
+
+
+class DeckListOrder(str, Enum):
+    """Supported ordering strategies for paginated deck listings."""
+
+    LATEST = "latest"
 
 
 class DeckStorageError(RuntimeError):
@@ -61,6 +68,15 @@ class DeckSearchResult:
     creator_name: str
     created_at: datetime
     deck_code: str
+
+
+@dataclass(frozen=True, slots=True)
+class DeckListItem:
+    """One lightweight entry in a paginated deck listing."""
+
+    id: int
+    name: str
+    creator_name: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -250,6 +266,51 @@ async def get_deck(
         raise
     except SQLAlchemyError as error:
         raise DeckStorageError("卡组查询失败") from error
+
+
+async def list_decks(
+    session: AsyncSession,
+    *,
+    page: int,
+    page_size: int,
+    order: DeckListOrder = DeckListOrder.LATEST,
+) -> tuple[DeckListItem, ...]:
+    """List one page of decks using a stable ordering strategy."""
+
+    if page < 1:
+        raise ValueError("page must be positive")
+    if page_size < 1:
+        raise ValueError("page_size must be positive")
+
+    statement = select(
+        DeckModel.id,
+        DeckModel.name,
+        DeckModel.creator_name,
+    )
+    if order is DeckListOrder.LATEST:
+        statement = statement.order_by(
+            DeckModel.created_at.desc(),
+            DeckModel.id.desc(),
+        )
+    else:
+        raise ValueError(f"unsupported deck list order: {order}")
+
+    try:
+        rows = (
+            await session.execute(
+                statement.offset((page - 1) * page_size).limit(page_size)
+            )
+        ).all()
+        return tuple(
+            DeckListItem(
+                id=row.id,
+                name=row.name,
+                creator_name=row.creator_name,
+            )
+            for row in rows
+        )
+    except SQLAlchemyError as error:
+        raise DeckStorageError("卡组列表查询失败") from error
 
 
 async def delete_deck(
