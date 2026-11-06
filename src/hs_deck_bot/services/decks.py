@@ -1,4 +1,4 @@
-"""Deck registration business logic."""
+"""Deck storage business logic."""
 
 from __future__ import annotations
 
@@ -31,6 +31,10 @@ class DeckNameConflictError(DeckStorageError):
     """Raised when one creator already has a deck with the same name."""
 
 
+class DeckNotFoundError(DeckStorageError):
+    """Raised when a deck cannot be found by creator and deck name."""
+
+
 class InvalidDeckNameError(DeckStorageError):
     """Raised when a deck or creator name cannot be persisted."""
 
@@ -50,6 +54,16 @@ class RegisteredDeck:
 @dataclass(frozen=True, slots=True)
 class DeckSearchResult:
     """One registered deck returned by a name search."""
+
+    id: int
+    name: str
+    creator_name: str
+    deck_code: str
+
+
+@dataclass(frozen=True, slots=True)
+class DeletedDeck:
+    """A deleted deck and the code needed to restore it."""
 
     id: int
     name: str
@@ -212,6 +226,46 @@ async def search_decks(
         )
     except KeyError as error:
         raise DeckStorageError("卡组在查询期间发生变化，请重试") from error
+
+
+async def delete_deck(
+    session: AsyncSession,
+    deck_name: str,
+    creator_name: str,
+) -> DeletedDeck:
+    """Delete one exactly matched deck and return its recovery code."""
+
+    display_deck_name = _clean_display_name(deck_name, "卡组名")
+    display_creator_name = _clean_display_name(creator_name, "创建者")
+    try:
+        deck = (
+            await session.execute(
+                select(DeckModel)
+                .where(
+                    DeckModel.creator_name == display_creator_name,
+                    DeckModel.name == display_deck_name,
+                )
+                .options(selectinload(DeckModel.card_entries))
+            )
+        ).scalar_one_or_none()
+        if deck is None:
+            raise DeckNotFoundError(
+                f"未找到创建者 {display_creator_name} 的卡组 {display_deck_name}"
+            )
+
+        deleted_deck = DeletedDeck(
+            id=deck.id,
+            name=deck.name,
+            creator_name=deck.creator_name,
+            deck_code=_encode_stored_deck(deck),
+        )
+        await session.delete(deck)
+        await session.flush()
+        return deleted_deck
+    except DeckStorageError:
+        raise
+    except SQLAlchemyError as error:
+        raise DeckStorageError("卡组删除失败") from error
 
 
 def _find_deck_ids(

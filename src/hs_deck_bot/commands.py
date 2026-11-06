@@ -22,11 +22,14 @@ from .database import (
     session_scope,
 )
 from .services import (
+    DeletedDeck,
     DeckNameConflictError,
+    DeckNotFoundError,
     DeckSearchResult,
     DeckStorageError,
     InvalidDeckNameError,
     RegisteredDeck,
+    delete_deck,
     register_deck,
     search_decks,
 )
@@ -34,8 +37,11 @@ from .services import (
 
 DECK_USAGE = "用法：/卡组 <卡组代码>"
 ADD_DECK_USAGE = "用法：/添加卡组 <卡组名> <创建者> <卡组代码>"
+DELETE_DECK_USAGE = "用法：/删卡组 <卡组名> <创建者>"
 SEARCH_DECK_USAGE = "用法：/找卡组 <卡组名>"
-UNKNOWN_COMMAND = "未知命令。支持的命令：/卡组、/添加卡组、/找卡组"
+UNKNOWN_COMMAND = (
+    "未知命令。支持的命令：/卡组、/添加卡组、/删卡组、/找卡组"
+)
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +137,33 @@ async def handle_search_deck_command(raw_args: str) -> str:
     return _search_deck_success_message(results)
 
 
+async def handle_delete_deck_command(raw_args: str) -> str:
+    """Execute `/delete-deck` and return its user-facing response."""
+
+    parsed_args = _parse_delete_deck_args(raw_args)
+    if parsed_args is None:
+        return DELETE_DECK_USAGE
+
+    deck_name, creator_name = parsed_args
+    if len(deck_name) > 255 or len(creator_name) > 255:
+        return "卡组名和创建者均不能超过 255 个字符。"
+
+    try:
+        async with session_scope() as session:
+            result = await delete_deck(session, deck_name, creator_name)
+        return _delete_deck_success_message(result)
+    except DeckNotFoundError:
+        return f"没有找到创建者「{creator_name}」的卡组「{deck_name}」。"
+    except InvalidDeckNameError as error:
+        return str(error)
+    except (DeckStorageError, DatabaseError):
+        logger.exception("处理 /delete-deck 命令时发生数据库错误")
+        return "卡组删除失败，请稍后重试。"
+    except Exception:
+        logger.exception("处理 /delete-deck 命令时发生未预期错误")
+        return "卡组删除失败，请稍后重试。"
+
+
 CommandHandler = Callable[[str], Awaitable[str]]
 
 COMMAND_HANDLERS: dict[str, CommandHandler] = {
@@ -138,6 +171,8 @@ COMMAND_HANDLERS: dict[str, CommandHandler] = {
     "/卡组": handle_deck_command,
     "/add-deck": handle_add_deck_command,
     "/添加卡组": handle_add_deck_command,
+    "/delete-deck": handle_delete_deck_command,
+    "/删卡组": handle_delete_deck_command,
     "/search-deck": handle_search_deck_command,
     "/找卡组": handle_search_deck_command,
 }
@@ -163,6 +198,13 @@ def _parse_add_deck_args(raw_args: str) -> tuple[str, str, str] | None:
     if len(parts) != 3:
         return None
     return parts[0], parts[1], parts[2]
+
+
+def _parse_delete_deck_args(raw_args: str) -> tuple[str, str] | None:
+    parts = raw_args.split()
+    if len(parts) != 2:
+        return None
+    return parts[0], parts[1]
 
 
 def _deck_error_message(error: HsDeckError) -> str:
@@ -194,6 +236,14 @@ def _add_deck_success_message(result: RegisteredDeck) -> str:
             f"模式：{result.format_name}",
             f"主牌数量：{result.card_count}",
         ]
+    )
+
+
+def _delete_deck_success_message(result: DeletedDeck) -> str:
+    return (
+        f"已删除「{result.creator_name}」创建的卡组「{result.name}」，"
+        "误操作请使用 "
+        f"`/添加卡组 {result.name} {result.creator_name} {result.deck_code}` 恢复。"
     )
 
 
