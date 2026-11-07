@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import logging
 import unicodedata
@@ -40,14 +41,119 @@ from .services import (
 )
 
 
-DECK_USAGE = "用法：/卡组 <卡组代码>"
-ADD_DECK_USAGE = "用法：/添加卡组 <卡组名> <创建者> <卡组代码>"
-DELETE_DECK_USAGE = "用法：/删卡组 <卡组名> <创建者>"
-LIST_DECK_USAGE = "用法：/所有卡组 [页数]"
-SEARCH_DECK_USAGE = "用法：/找卡组 <卡组名> [创建者]"
+@dataclass(frozen=True, slots=True)
+class CommandHelp:
+    english_name: str
+    chinese_name: str
+    arguments: str
+    summary: str
+    details: str
+
+    def usage(self, name: str) -> str:
+        return f"/{name} {self.arguments}" if self.arguments else f"/{name}"
+
+
+_DECK_HELP = CommandHelp(
+    english_name="deck",
+    chinese_name="卡组",
+    arguments="<卡组代码>",
+    summary="将卡组代码转换为中文卡表。",
+    details=(
+        "解析完整的炉石卡组代码，并返回职业、模式、卡牌列表及可复制的卡组代码。"
+    ),
+)
+_ADD_DECK_HELP = CommandHelp(
+    english_name="add-deck",
+    chinese_name="添加卡组",
+    arguments="<卡组名> <创建者> <卡组代码>",
+    summary="注册公共卡组。",
+    details=(
+        "解析并注册一套公共卡组。卡组名和创建者不能包含空格、不能为空且"
+        "最长 255 个字符；同一创建者不能重复注册同名卡组。"
+    ),
+)
+_DELETE_DECK_HELP = CommandHelp(
+    english_name="delete-deck",
+    chinese_name="删卡组",
+    arguments="<卡组名> <创建者>",
+    summary="删除公共卡组并返回恢复命令。",
+    details=(
+        "精确匹配卡组名和创建者并删除卡组，无需身份验证或二次确认。"
+        "删除成功后会返回一条恢复命令。"
+    ),
+)
+_SEARCH_DECK_HELP = CommandHelp(
+    english_name="search-deck",
+    chinese_name="找卡组",
+    arguments="<卡组名> [创建者]",
+    summary="模糊搜索或精确查询公共卡组。",
+    details=(
+        "只提供卡组名时进行模糊搜索；同时提供创建者时精确查询唯一卡组。"
+        "卡组名和创建者不能包含空格且最长 255 个字符。"
+    ),
+)
+_LIST_DECK_HELP = CommandHelp(
+    english_name="list-deck",
+    chinese_name="所有卡组",
+    arguments="[页数]",
+    summary="分页列出已注册卡组。",
+    details=(
+        "按创建时间从新到旧分页列出公共卡组，每页最多 20 套。页数可省略，"
+        "默认第 1 页，并且必须是正整数。"
+    ),
+)
+_HELP_HELP = CommandHelp(
+    english_name="help",
+    chinese_name="用法",
+    arguments="[命令]",
+    summary="查看常见用法或指定命令的详细说明。",
+    details=(
+        "不带参数时列出常见用法；带一个不含斜杠的中英文命令名时显示对应"
+        "命令的详细说明。"
+    ),
+)
+
+_COMMAND_HELP_ENTRIES = (
+    _DECK_HELP,
+    _ADD_DECK_HELP,
+    _DELETE_DECK_HELP,
+    _SEARCH_DECK_HELP,
+    _LIST_DECK_HELP,
+    _HELP_HELP,
+)
+_COMMAND_HELP_BY_NAME = {
+    name: entry
+    for entry in _COMMAND_HELP_ENTRIES
+    for name in (entry.english_name, entry.chinese_name)
+}
+
+DECK_USAGE = f"用法：{_DECK_HELP.usage(_DECK_HELP.chinese_name)}"
+ADD_DECK_USAGE = f"用法：{_ADD_DECK_HELP.usage(_ADD_DECK_HELP.chinese_name)}"
+DELETE_DECK_USAGE = (
+    f"用法：{_DELETE_DECK_HELP.usage(_DELETE_DECK_HELP.chinese_name)}"
+)
+LIST_DECK_USAGE = (
+    f"用法：{_LIST_DECK_HELP.usage(_LIST_DECK_HELP.chinese_name)}"
+)
+SEARCH_DECK_USAGE = (
+    f"用法：{_SEARCH_DECK_HELP.usage(_SEARCH_DECK_HELP.chinese_name)}"
+)
+HELP_USAGE = f"用法：{_HELP_HELP.usage(_HELP_HELP.chinese_name)}"
+HELP_OVERVIEW = "\n".join(
+    [
+        "炉石卡组 Bot 常见用法：",
+        "",
+        *(
+            f"{entry.usage(entry.chinese_name)}：{entry.summary}"
+            for entry in _COMMAND_HELP_ENTRIES
+        ),
+        "",
+        "使用 `/用法 <命令>` 查看详细说明。",
+    ]
+)
 UNKNOWN_COMMAND = (
     "未知命令。支持的命令："
-    "/卡组、/添加卡组、/删卡组、/找卡组、/所有卡组"
+    "/卡组、/添加卡组、/删卡组、/找卡组、/所有卡组、/用法"
 )
 
 logger = logging.getLogger(__name__)
@@ -226,6 +332,22 @@ async def handle_list_deck_command(raw_args: str) -> str:
     return _list_deck_success_message(page, results)
 
 
+async def handle_help_command(raw_args: str) -> str:
+    """Execute `/help` and return its user-facing response."""
+
+    parts = raw_args.split()
+    if not parts:
+        return HELP_OVERVIEW
+    if len(parts) > 1:
+        return HELP_USAGE
+
+    name = parts[0]
+    entry = _COMMAND_HELP_BY_NAME.get(name)
+    if entry is None:
+        return f"没有找到命令「{name}」的使用说明。"
+    return f"用法：{entry.usage(name)}\n\n{entry.details}"
+
+
 CommandHandler = Callable[[str], Awaitable[str]]
 
 COMMAND_HANDLERS: dict[str, CommandHandler] = {
@@ -239,6 +361,8 @@ COMMAND_HANDLERS: dict[str, CommandHandler] = {
     "/所有卡组": handle_list_deck_command,
     "/search-deck": handle_search_deck_command,
     "/找卡组": handle_search_deck_command,
+    "/help": handle_help_command,
+    "/用法": handle_help_command,
 }
 
 
