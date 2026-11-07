@@ -1,10 +1,11 @@
 """List registered public Hearthstone decks."""
 
 from nonebot import on_command
-from nonebot.adapters.qq import Message
+from nonebot.adapters.qq import Bot, Message, MessageEvent
 from nonebot.params import CommandArg
 
 from hs_deck_bot.commands import handle_list_deck_command
+from hs_deck_bot.conversation_logging import public_command
 
 
 list_deck = on_command(
@@ -16,7 +17,10 @@ list_deck = on_command(
 
 
 @list_deck.handle()
-async def handle_list_deck(args: Message = CommandArg()) -> None:
-    await list_deck.finish(
-        await handle_list_deck_command(args.extract_plain_text())
-    )
+@public_command(list_deck)
+async def handle_list_deck(
+    bot: Bot,
+    event: MessageEvent,
+    args: Message = CommandArg(),
+) -> str:
+    return await handle_list_deck_command(args.extract_plain_text())
