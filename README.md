@@ -36,6 +36,15 @@ QQ_BOTS='[
 
 `c2c_group_at_messages` 表示要么私聊机器人，要么在群里 @ 机器人。
 
+另外配置可以使用只读或读写命令的 QQ 群与私聊用户：
+
+```text
+HS_DECK_WRITER_GROUP_OPENIDS='["<读写群 group_openid>"]'
+HS_DECK_READER_GROUP_OPENIDS='["<只读群 group_openid>"]'
+HS_DECK_WRITER_USER_OPENIDS='["<读写用户 user_openid>"]'
+HS_DECK_READER_USER_OPENIDS='["<只读用户 user_openid>"]'
+```
+
 ## 启动 Bot
 
 ```bash

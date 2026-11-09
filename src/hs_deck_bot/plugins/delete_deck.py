@@ -1,15 +1,16 @@
 """Delete registered public Hearthstone decks."""
 
-from nonebot import on_command
 from nonebot.adapters.qq import Bot, Message, MessageEvent
 from nonebot.params import CommandArg
 
+from hs_deck_bot.access_control import AccessRole, on_authorized_command
 from hs_deck_bot.commands import handle_delete_deck_command
 from hs_deck_bot.conversation_logging import public_command
 
 
-delete_deck = on_command(
+delete_deck = on_authorized_command(
     "delete-deck",
+    required_role=AccessRole.WRITER,
     aliases={"删卡组"},
     priority=10,
     block=True,
